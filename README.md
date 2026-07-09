@@ -24,6 +24,7 @@
 
 | 文档 | 简介 |
 |------|------|
+| [langchain.md](python/langchain.md) | LangChain 1.0+ 核心知识：Model、Prompt、LCEL、Chain、Memory、Agent（create_agent + Middleware）、RAG、Tool、LangGraph、LangSmith |
 | [生成器.md](python/生成器.md) | 生成器函数、生成器表达式、`yield from`、send/throw/close |
 | [装饰器.md](python/装饰器.md) | 函数装饰器、类装饰器、`@wraps`、内置装饰器、实战案例 |
 | [异步协程.md](python/异步协程.md) | async/await、事件循环、Task/TaskGroup、同步原语、网络 IO |
