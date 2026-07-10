@@ -2,6 +2,7 @@
 
 ## 目录
 
+**第一阶段：基础入门（学会"对话"）**
 1. [概述](#概述)
 2. [核心架构总览](#核心架构总览)
 3. [Model（模型）](#model模型)
@@ -9,16 +10,24 @@
 5. [Output Parser（输出解析器）](#output-parser输出解析器)
 6. [LCEL（LangChain 表达式语言）](#lcellangchain-表达式语言)
 7. [Chain（链）](#chain链)
-8. [Memory（记忆）](#memory记忆)
-9. [Embedding（词嵌入）](#embedding词嵌入)
-10. [Vector Store（向量存储）](#vector-store向量存储)
-11. [Retriever（检索器）](#retriever检索器)
-12. [RAG（检索增强生成）](#rag检索增强生成)
-13. [Tool（工具）](#tool工具)
-14. [Agent（智能体）](#agent智能体)
+
+**第二阶段：让 AI 动起来（最吸引人的部分）**
+8. [Tool（工具）](#tool工具)
+9. [Agent（智能体）](#agent智能体)
+10. [Memory（记忆）](#memory记忆)
+
+**第三阶段：让 AI 有知识（RAG 方向）**
+11. [Embedding（词嵌入）](#embedding词嵌入)
+12. [Vector Store（向量存储）](#vector-store向量存储)
+13. [Retriever（检索器）](#retriever检索器)
+14. [RAG（检索增强生成）](#rag检索增强生成)
+
+**第四阶段：生产级能力（进阶可选）**
 15. [Callback（回调）](#callback回调)
 16. [LangGraph（图式工作流）](#langgraph图式工作流)
 17. [LangSmith（观测与评估）](#langsmith观测与评估)
+
+**第五阶段：综合实践**
 18. [实战案例](#实战案例)
 19. [最佳实践](#最佳实践)
 20. [总结](#总结)
@@ -107,6 +116,10 @@ LangChain 的核心思想是**组件化 + 可组合**。所有组件都遵循统
 │   底层支撑: Embedding(嵌入) + Vector Store(向量存储)      │
 └─────────────────────────────────────────────────────────┘
 ```
+
+![LangChain 核心架构概念图](images/langchain_arch.png)
+
+> **架构全景**：Prompt（提示词）→ Model（模型）→ Parser（解析器）是核心管道，Tool 和 Agent 在上方负责自主决策，Memory 和 Embedding 在下方提供数据支撑。
 
 ### Runnable 统一接口
 
@@ -669,6 +682,343 @@ LCEL 是实现方式（用 | 管道符）
 
 ---
 
+## Tool（工具）
+
+Tool 是**让模型能够执行实际操作**的接口。模型本身只会「说话」，但通过 Tool，它可以查天气、搜网页、查数据库、运行代码、调用 API。
+
+### 为什么需要 Tool？
+
+```
+没有 Tool:
+  用户: 今天北京天气怎么样？
+  AI:   我无法获取实时天气信息...（只会说，不会做）
+
+有 Tool:
+  用户: 今天北京天气怎么样？
+  AI:   [调用天气 API] → 北京今天 28°C，晴
+       北京今天晴，气温 28°C。（能做事了！）
+```
+
+### 创建自定义 Tool
+
+#### 方式一：@tool 装饰器（推荐）
+
+```python
+from langchain.tools import tool
+
+@tool
+def add(a: int, b: int) -> int:
+    """两个整数相加"""
+    return a + b
+
+@tool
+def multiply(a: int, b: int) -> int:
+    """两个整数相乘"""
+    return a * b
+
+@tool
+def get_word_length(word: str) -> int:
+    """获取单词的字符长度"""
+    return len(word)
+
+# 直接调用（普通函数一样用）
+print(add.invoke({"a": 3, "b": 5}))  # 8
+print(get_word_length.invoke({"word": "hello"}))  # 5
+```
+
+> **关键点**：函数的**docstring 就是给模型看的工具说明**。模型通过 docstring 决定什么时候用这个工具、怎么用。所以 docstring 一定要写清楚！
+
+#### 方式二：StructuredTool（更灵活）
+
+```python
+from langchain.tools import StructuredTool
+from pydantic import BaseModel, Field
+
+class SearchInput(BaseModel):
+    query: str = Field(description="搜索关键词")
+    limit: int = Field(default=5, description="返回结果数量")
+
+def search_func(query: str, limit: int = 5) -> str:
+    return f"搜索 '{query}'，返回 {limit} 条结果"
+
+search_tool = StructuredTool.from_function(
+    func=search_func,
+    name="search",
+    description="搜索互联网获取信息",
+    args_schema=SearchInput,
+)
+```
+
+### Tool 的属性
+
+```python
+print(add.name)           # "add"
+print(add.description)    # "两个整数相加"
+print(add.args_schema)    # 参数的 schema（模型据此生成参数）
+print(add.args)           # {'a': {'type': 'integer'}, 'b': {'type': 'integer'}}
+```
+
+### 内置工具
+
+LangChain 提供了一些现成的工具：
+
+```python
+# Python 代码执行器
+from langchain_experimental.tools import PythonREPLTool
+python_tool = PythonREPLTool()
+
+# DuckDuckGo 搜索
+from langchain_community.tools import DuckDuckGoSearchRun
+search_tool = DuckDuckGoSearchRun()
+```
+
+### Tool 的运行流程
+
+```
+1. 模型收到问题和可用工具列表
+2. 模型决定: "我需要用 add 工具，参数 a=3, b=5"
+3. LangChain 执行 add(3, 5) = 8
+4. 把结果 8 返回给模型
+5. 模型基于结果生成最终回答: "3 + 5 = 8"
+```
+
+---
+
+## Agent（智能体）
+
+Agent 是 LangChain 中**最高级的组件**。它能**自主决策**：面对一个问题，它自己决定该用什么工具、该不该搜索、该不该计算，像一个能独立思考的助手。
+
+### Agent vs Chain 的区别
+
+这是理解 Agent 的关键：
+
+| 特性 | Chain（链） | Agent（智能体） |
+|------|------------|----------------|
+| 执行流程 | **固定**，预定义好步骤 | **动态**，模型自己决定下一步 |
+| 谁来控制 | 开发者写死流程 | 模型自主决策 |
+| 灵活性 | 低 | 高 |
+| 可预测性 | 高 | 较低 |
+| 类比 | 流水线工人 | 独立思考的助手 |
+
+```
+Chain:  输入 → 步骤A → 步骤B → 步骤C → 输出（固定路线）
+
+Agent:  输入 → 模型思考"该干嘛？"
+                    │
+                    ├─ 需要搜索？ → 调搜索工具 → 拿到结果
+                    │       │
+                    │       └─ 再思考"还需要干嘛？"
+                    │              │
+                    │              ├─ 需要计算？ → 调计算工具 → 拿到结果
+                    │              │       │
+                    │              │       └─ 再思考"信息够了？" → 输出答案
+                    │              └─ 信息够了 → 输出答案
+                    └─ 信息够了 → 直接输出答案
+```
+
+![Agent 自主决策循环图](images/langchain_agent_loop.png)
+
+> **Agent 的核心循环**：Think（思考该用什么工具）→ Act（调用工具执行）→ Observe（观察结果）→ 循环，直到信息足够输出最终回答。
+
+### ReAct 模式
+
+Agent 最常用的推理模式是 **ReAct（Reasoning + Acting）**：
+
+```
+Thought:  用户问 25 的平方根，我需要计算
+Action:   使用 calculator 工具
+Action Input: sqrt(25)
+Observation: 5.0
+Thought:  得到结果 5.0，可以回答了
+Final Answer: 25 的平方根是 5
+```
+
+### 创建 Agent
+
+v1.0 推荐使用 `create_agent`——它是构建 Agent 的标准方式，基于 LangGraph 构建，自带持久化、流式、人机协作：
+
+```python
+from langchain.agents import create_agent
+from langchain.tools import tool
+from langchain_openai import ChatOpenAI
+
+# 1. 准备工具
+@tool
+def add(a: int, b: int) -> int:
+    """两个整数相加"""
+    return a + b
+
+@tool
+def multiply(a: int, b: int) -> int:
+    """两个整数相乘"""
+    return a * b
+
+@tool
+def power(base: int, exp: int) -> int:
+    """计算 base 的 exp 次方"""
+    return base ** exp
+
+# 2. 一行创建 Agent（不需要手动拼 prompt、不需要 AgentExecutor）
+agent = create_agent(
+    model="gpt-4o-mini",                          # 模型（字符串或对象都行）
+    tools=[add, multiply, power],                  # 工具列表
+    system_prompt="你是一个数学助手，可以使用提供的工具来计算",
+)
+
+# 3. 运行
+result = agent.invoke({
+    "messages": [{"role": "user", "content": "3 的 4 次方是多少？然后再乘以 2"}]
+})
+print(result["messages"][-1].content)
+# 输出: 3 的 4 次方是 81，再乘以 2 等于 162。
+```
+
+> 对比旧方式（`create_tool_calling_agent` + `AgentExecutor` + 手动拼 prompt），`create_agent` 把这些都简化了——不需要 `agent_scratchpad`、不需要 `AgentExecutor`、不需要手动拼 prompt 模板。
+
+### Agent 执行过程
+
+```
+Agent 收到: "3 的 4 次方是多少？然后再乘以 2"
+
+第1轮思考: 我需要先计算 3 的 4 次方
+  → 调用工具: power(base=3, exp=4)
+  → 结果: 81
+
+第2轮思考: 现在把 81 乘以 2
+  → 调用工具: multiply(a=81, b=2)
+  → 结果: 162
+
+第3轮思考: 计算完成，不需要更多工具了
+  → 最终回答: 3 的 4 次方是 81，再乘以 2 等于 162。
+```
+
+### Middleware：Agent 的中间件系统（v1.0 核心特性）
+
+Middleware 是 `create_agent` 的杀手锏——它让你在 Agent 执行的每一步**插入自定义逻辑**，不用改 Agent 本身：
+
+```python
+from langchain.agents import create_agent
+from langchain.agents.middleware import (
+    SummarizationMiddleware,       # 自动总结长对话
+    HumanInTheLoopMiddleware,      # 敏感操作需人工确认
+    PIIMiddleware,                 # 自动脱敏敏感信息
+)
+
+agent = create_agent(
+    model="gpt-4o-mini",
+    tools=[read_email, send_email],
+    middleware=[
+        # 自动脱敏邮箱和手机号
+        PIIMiddleware("email", strategy="redact"),
+        PIIMiddleware("phone_number", strategy="block"),
+
+        # 对话超过 500 token 时自动总结历史
+        SummarizationMiddleware(
+            model="gpt-4o-mini",
+            trigger={"tokens": 500}
+        ),
+
+        # 发邮件前必须人工确认
+        HumanInTheLoopMiddleware(
+            interrupt_on={"send_email": {"allowed_decisions": ["approve", "reject"]}}
+        ),
+    ]
+)
+```
+
+**Middleware 的钩子点：**
+
+| 钩子 | 执行时机 | 典型用途 |
+|------|---------|---------|
+| `before_agent` | Agent 开始前 | 加载记忆、校验输入 |
+| `before_model` | 每次调模型前 | 更新 prompt、裁剪消息 |
+| `wrap_model_call` | 包裹模型调用 | 拦截/修改请求和响应 |
+| `wrap_tool_call` | 包裹工具调用 | 拦截/修改工具执行 |
+| `after_model` | 模型响应后 | 校验输出、加护栏 |
+| `after_agent` | Agent 结束后 | 保存结果、清理 |
+
+> Middleware 相当于旧版 `AgentExecutor` 的 `max_iterations`、`handle_parsing_errors` 等参数的升级版——更灵活、更可组合。
+
+### 带记忆的 Agent
+
+`create_agent` 基于 LangGraph，**内置 checkpoint 支持**，不需要额外的 Memory 类：
+
+```python
+from langchain.agents import create_agent
+from langgraph.checkpoint.memory import MemorySaver
+
+agent = create_agent(
+    model="gpt-4o-mini",
+    tools=[add, multiply],
+    system_prompt="你是一个数学助手",
+    checkpointer=MemorySaver(),  # ← 一行加上记忆
+)
+
+# 用 thread_id 标识会话
+config = {"configurable": {"thread_id": "session-1"}}
+
+# 第一轮
+agent.invoke(
+    {"messages": [{"role": "user", "content": "3 + 5 等于多少？"}]},
+    config=config
+)
+# → 8
+
+# 第二轮（记得上一轮的结果）
+agent.invoke(
+    {"messages": [{"role": "user", "content": "再乘以 3 呢？"}]},
+    config=config
+)
+# → 24（记得上面是 8，8 × 3 = 24）
+```
+
+### 结构化输出
+
+v1.0 的 `create_agent` 支持直接输出结构化数据，不需要额外的 Output Parser：
+
+```python
+from langchain.agents import create_agent
+from langchain.agents.structured_output import ToolStrategy
+from pydantic import BaseModel
+
+class Weather(BaseModel):
+    temperature: float
+    condition: str
+
+def weather_tool(city: str) -> str:
+    """获取城市天气"""
+    return f"{city} 晴天 25度"
+
+agent = create_agent(
+    "gpt-4o-mini",
+    tools=[weather_tool],
+    response_format=ToolStrategy(Weather),  # ← 直接输出 Pydantic 对象
+)
+
+result = agent.invoke({
+    "messages": [{"role": "user", "content": "北京天气怎么样？"}]
+})
+print(result["structured_response"])
+# Weather(temperature=25.0, condition='晴')
+```
+
+### v1.0 vs 旧版 Agent 对比
+
+| 特性 | 旧版（0.x） | v1.0 |
+|------|------------|------|
+| 创建方式 | `create_tool_calling_agent` + `AgentExecutor` | `create_agent`（一步搞定） |
+| Prompt | 手动拼，需含 `agent_scratchpad` | 自动生成，只需 `system_prompt` |
+| 记忆 | `ConversationBufferMemory`（已弃用） | 内置 LangGraph checkpoint |
+| 扩展机制 | `AgentExecutor` 参数 | Middleware 中间件系统 |
+| 人机协作 | 需手动实现 | `HumanInTheLoopMiddleware` |
+| 结构化输出 | 需额外 Output Parser | `response_format=ToolStrategy()` |
+| 持久化 | 无 | 内置 checkpoint |
+| 流式 | 需配置 | 内置支持 |
+
+> **旧版迁移**：如果你的代码用了 `create_tool_calling_agent` + `AgentExecutor`，安装 `langchain-classic` 可以继续用，但建议迁移到 `create_agent`。
+
+---
+
 ## Memory（记忆）
 
 模型本身是**无状态**的——每次调用都是独立的，它不记得上一次说了什么。在 v1.0 中，旧的 Memory 类（`ConversationBufferMemory` 等）已移至 `langchain-classic`，官方推荐两种新方式：**手动管理消息列表**（简单场景）和 **LangGraph checkpoint**（需要持久化的场景）。
@@ -1019,6 +1369,10 @@ print(rag_chain.invoke("Python 是什么类型的语言？"))
 
 RAG（Retrieval-Augmented Generation）是 LangChain 最重要的应用模式：**先从你的私有数据中检索相关内容，再让模型基于这些内容回答**。
 
+![RAG 检索增强生成流程图](images/langchain_rag_flow.png)
+
+> **一图看懂 RAG**：左边是索引阶段（文档 → 切片 → 嵌入 → 存储），右边是查询阶段（用户提问 → 检索 → 拼接提示词 → 模型回答）。就像「开卷考试」——模型不用背答案，翻书找就行。
+
 ### 为什么需要 RAG？
 
 | 问题 | 不用 RAG | 用 RAG |
@@ -1148,339 +1502,6 @@ result = rag_with_sources.invoke("Python 用在哪里？")
 print("回答:", result["answer"])
 print("来源文档数:", len(result["sources"]))
 ```
-
----
-
-## Tool（工具）
-
-Tool 是**让模型能够执行实际操作**的接口。模型本身只会「说话」，但通过 Tool，它可以查天气、搜网页、查数据库、运行代码、调用 API。
-
-### 为什么需要 Tool？
-
-```
-没有 Tool:
-  用户: 今天北京天气怎么样？
-  AI:   我无法获取实时天气信息...（只会说，不会做）
-
-有 Tool:
-  用户: 今天北京天气怎么样？
-  AI:   [调用天气 API] → 北京今天 28°C，晴
-       北京今天晴，气温 28°C。（能做事了！）
-```
-
-### 创建自定义 Tool
-
-#### 方式一：@tool 装饰器（推荐）
-
-```python
-from langchain.tools import tool
-
-@tool
-def add(a: int, b: int) -> int:
-    """两个整数相加"""
-    return a + b
-
-@tool
-def multiply(a: int, b: int) -> int:
-    """两个整数相乘"""
-    return a * b
-
-@tool
-def get_word_length(word: str) -> int:
-    """获取单词的字符长度"""
-    return len(word)
-
-# 直接调用（普通函数一样用）
-print(add.invoke({"a": 3, "b": 5}))  # 8
-print(get_word_length.invoke({"word": "hello"}))  # 5
-```
-
-> **关键点**：函数的**docstring 就是给模型看的工具说明**。模型通过 docstring 决定什么时候用这个工具、怎么用。所以 docstring 一定要写清楚！
-
-#### 方式二：StructuredTool（更灵活）
-
-```python
-from langchain.tools import StructuredTool
-from pydantic import BaseModel, Field
-
-class SearchInput(BaseModel):
-    query: str = Field(description="搜索关键词")
-    limit: int = Field(default=5, description="返回结果数量")
-
-def search_func(query: str, limit: int = 5) -> str:
-    return f"搜索 '{query}'，返回 {limit} 条结果"
-
-search_tool = StructuredTool.from_function(
-    func=search_func,
-    name="search",
-    description="搜索互联网获取信息",
-    args_schema=SearchInput,
-)
-```
-
-### Tool 的属性
-
-```python
-print(add.name)           # "add"
-print(add.description)    # "两个整数相加"
-print(add.args_schema)    # 参数的 schema（模型据此生成参数）
-print(add.args)           # {'a': {'type': 'integer'}, 'b': {'type': 'integer'}}
-```
-
-### 内置工具
-
-LangChain 提供了一些现成的工具：
-
-```python
-# Python 代码执行器
-from langchain_experimental.tools import PythonREPLTool
-python_tool = PythonREPLTool()
-
-# DuckDuckGo 搜索
-from langchain_community.tools import DuckDuckGoSearchRun
-search_tool = DuckDuckGoSearchRun()
-```
-
-### Tool 的运行流程
-
-```
-1. 模型收到问题和可用工具列表
-2. 模型决定: "我需要用 add 工具，参数 a=3, b=5"
-3. LangChain 执行 add(3, 5) = 8
-4. 把结果 8 返回给模型
-5. 模型基于结果生成最终回答: "3 + 5 = 8"
-```
-
----
-
-## Agent（智能体）
-
-Agent 是 LangChain 中**最高级的组件**。它能**自主决策**：面对一个问题，它自己决定该用什么工具、该不该搜索、该不该计算，像一个能独立思考的助手。
-
-### Agent vs Chain 的区别
-
-这是理解 Agent 的关键：
-
-| 特性 | Chain（链） | Agent（智能体） |
-|------|------------|----------------|
-| 执行流程 | **固定**，预定义好步骤 | **动态**，模型自己决定下一步 |
-| 谁来控制 | 开发者写死流程 | 模型自主决策 |
-| 灵活性 | 低 | 高 |
-| 可预测性 | 高 | 较低 |
-| 类比 | 流水线工人 | 独立思考的助手 |
-
-```
-Chain:  输入 → 步骤A → 步骤B → 步骤C → 输出（固定路线）
-
-Agent:  输入 → 模型思考"该干嘛？"
-                    │
-                    ├─ 需要搜索？ → 调搜索工具 → 拿到结果
-                    │       │
-                    │       └─ 再思考"还需要干嘛？"
-                    │              │
-                    │              ├─ 需要计算？ → 调计算工具 → 拿到结果
-                    │              │       │
-                    │              │       └─ 再思考"信息够了？" → 输出答案
-                    │              └─ 信息够了 → 输出答案
-                    └─ 信息够了 → 直接输出答案
-```
-
-### ReAct 模式
-
-Agent 最常用的推理模式是 **ReAct（Reasoning + Acting）**：
-
-```
-Thought:  用户问 25 的平方根，我需要计算
-Action:   使用 calculator 工具
-Action Input: sqrt(25)
-Observation: 5.0
-Thought:  得到结果 5.0，可以回答了
-Final Answer: 25 的平方根是 5
-```
-
-### 创建 Agent
-
-v1.0 推荐使用 `create_agent`——它是构建 Agent 的标准方式，基于 LangGraph 构建，自带持久化、流式、人机协作：
-
-```python
-from langchain.agents import create_agent
-from langchain.tools import tool
-from langchain_openai import ChatOpenAI
-
-# 1. 准备工具
-@tool
-def add(a: int, b: int) -> int:
-    """两个整数相加"""
-    return a + b
-
-@tool
-def multiply(a: int, b: int) -> int:
-    """两个整数相乘"""
-    return a * b
-
-@tool
-def power(base: int, exp: int) -> int:
-    """计算 base 的 exp 次方"""
-    return base ** exp
-
-# 2. 一行创建 Agent（不需要手动拼 prompt、不需要 AgentExecutor）
-agent = create_agent(
-    model="gpt-4o-mini",                          # 模型（字符串或对象都行）
-    tools=[add, multiply, power],                  # 工具列表
-    system_prompt="你是一个数学助手，可以使用提供的工具来计算",
-)
-
-# 3. 运行
-result = agent.invoke({
-    "messages": [{"role": "user", "content": "3 的 4 次方是多少？然后再乘以 2"}]
-})
-print(result["messages"][-1].content)
-# 输出: 3 的 4 次方是 81，再乘以 2 等于 162。
-```
-
-> 对比旧方式（`create_tool_calling_agent` + `AgentExecutor` + 手动拼 prompt），`create_agent` 把这些都简化了——不需要 `agent_scratchpad`、不需要 `AgentExecutor`、不需要手动拼 prompt 模板。
-
-### Agent 执行过程
-
-```
-Agent 收到: "3 的 4 次方是多少？然后再乘以 2"
-
-第1轮思考: 我需要先计算 3 的 4 次方
-  → 调用工具: power(base=3, exp=4)
-  → 结果: 81
-
-第2轮思考: 现在把 81 乘以 2
-  → 调用工具: multiply(a=81, b=2)
-  → 结果: 162
-
-第3轮思考: 计算完成，不需要更多工具了
-  → 最终回答: 3 的 4 次方是 81，再乘以 2 等于 162。
-```
-
-### Middleware：Agent 的中间件系统（v1.0 核心特性）
-
-Middleware 是 `create_agent` 的杀手锏——它让你在 Agent 执行的每一步**插入自定义逻辑**，不用改 Agent 本身：
-
-```python
-from langchain.agents import create_agent
-from langchain.agents.middleware import (
-    SummarizationMiddleware,       # 自动总结长对话
-    HumanInTheLoopMiddleware,      # 敏感操作需人工确认
-    PIIMiddleware,                 # 自动脱敏敏感信息
-)
-
-agent = create_agent(
-    model="gpt-4o-mini",
-    tools=[read_email, send_email],
-    middleware=[
-        # 自动脱敏邮箱和手机号
-        PIIMiddleware("email", strategy="redact"),
-        PIIMiddleware("phone_number", strategy="block"),
-
-        # 对话超过 500 token 时自动总结历史
-        SummarizationMiddleware(
-            model="gpt-4o-mini",
-            trigger={"tokens": 500}
-        ),
-
-        # 发邮件前必须人工确认
-        HumanInTheLoopMiddleware(
-            interrupt_on={"send_email": {"allowed_decisions": ["approve", "reject"]}}
-        ),
-    ]
-)
-```
-
-**Middleware 的钩子点：**
-
-| 钩子 | 执行时机 | 典型用途 |
-|------|---------|---------|
-| `before_agent` | Agent 开始前 | 加载记忆、校验输入 |
-| `before_model` | 每次调模型前 | 更新 prompt、裁剪消息 |
-| `wrap_model_call` | 包裹模型调用 | 拦截/修改请求和响应 |
-| `wrap_tool_call` | 包裹工具调用 | 拦截/修改工具执行 |
-| `after_model` | 模型响应后 | 校验输出、加护栏 |
-| `after_agent` | Agent 结束后 | 保存结果、清理 |
-
-> Middleware 相当于旧版 `AgentExecutor` 的 `max_iterations`、`handle_parsing_errors` 等参数的升级版——更灵活、更可组合。
-
-### 带记忆的 Agent
-
-`create_agent` 基于 LangGraph，**内置 checkpoint 支持**，不需要额外的 Memory 类：
-
-```python
-from langchain.agents import create_agent
-from langgraph.checkpoint.memory import MemorySaver
-
-agent = create_agent(
-    model="gpt-4o-mini",
-    tools=[add, multiply],
-    system_prompt="你是一个数学助手",
-    checkpointer=MemorySaver(),  # ← 一行加上记忆
-)
-
-# 用 thread_id 标识会话
-config = {"configurable": {"thread_id": "session-1"}}
-
-# 第一轮
-agent.invoke(
-    {"messages": [{"role": "user", "content": "3 + 5 等于多少？"}]},
-    config=config
-)
-# → 8
-
-# 第二轮（记得上一轮的结果）
-agent.invoke(
-    {"messages": [{"role": "user", "content": "再乘以 3 呢？"}]},
-    config=config
-)
-# → 24（记得上面是 8，8 × 3 = 24）
-```
-
-### 结构化输出
-
-v1.0 的 `create_agent` 支持直接输出结构化数据，不需要额外的 Output Parser：
-
-```python
-from langchain.agents import create_agent
-from langchain.agents.structured_output import ToolStrategy
-from pydantic import BaseModel
-
-class Weather(BaseModel):
-    temperature: float
-    condition: str
-
-def weather_tool(city: str) -> str:
-    """获取城市天气"""
-    return f"{city} 晴天 25度"
-
-agent = create_agent(
-    "gpt-4o-mini",
-    tools=[weather_tool],
-    response_format=ToolStrategy(Weather),  # ← 直接输出 Pydantic 对象
-)
-
-result = agent.invoke({
-    "messages": [{"role": "user", "content": "北京天气怎么样？"}]
-})
-print(result["structured_response"])
-# Weather(temperature=25.0, condition='晴')
-```
-
-### v1.0 vs 旧版 Agent 对比
-
-| 特性 | 旧版（0.x） | v1.0 |
-|------|------------|------|
-| 创建方式 | `create_tool_calling_agent` + `AgentExecutor` | `create_agent`（一步搞定） |
-| Prompt | 手动拼，需含 `agent_scratchpad` | 自动生成，只需 `system_prompt` |
-| 记忆 | `ConversationBufferMemory`（已弃用） | 内置 LangGraph checkpoint |
-| 扩展机制 | `AgentExecutor` 参数 | Middleware 中间件系统 |
-| 人机协作 | 需手动实现 | `HumanInTheLoopMiddleware` |
-| 结构化输出 | 需额外 Output Parser | `response_format=ToolStrategy()` |
-| 持久化 | 无 | 内置 checkpoint |
-| 流式 | 需配置 | 内置支持 |
-
-> **旧版迁移**：如果你的代码用了 `create_tool_calling_agent` + `AgentExecutor`，安装 `langchain-classic` 可以继续用，但建议迁移到 `create_agent`。
 
 ---
 
@@ -2360,18 +2381,25 @@ load_dotenv()  # 自动加载 .env 中的变量
 ### 学习路径建议
 
 ```
-入门:  Model（init_chat_model）→ Prompt → Output Parser → LCEL
-       （掌握基础组件和管道语法）
+第一阶段（基础入门）:  Model → Prompt → Output Parser → LCEL → Chain
+                   （掌握基础组件和管道语法，学会“对话”）
 
-进阶:  Chain（LCEL 管道）→ Memory（手动管理消息）→ Retriever → RAG
-       （构建实用应用：对话机器人、文档问答）
+第二阶段（让AI动起来）: Tool（@tool）→ Agent（create_agent）→ Memory
+                   （尽早体验 AI 自主做事，保持学习动力）
 
-高级:  Tool（@tool 装饰器）→ Agent（create_agent）→ Middleware → Callback
-       （自主智能体、中间件拦截、可观测性、生产级应用）
+第三阶段（让AI有知识）: Embedding → Vector Store → Retriever → RAG
+                   （构建知识库问答，和 Agent 并列的另一条路线）
 
-专家:  LangGraph → LangSmith
-       （复杂图式工作流 + 全生命周期观测评估）
+第四阶段（生产级能力）: Callback → LangGraph → LangSmith
+                   （可观测性、复杂工作流、全生命周期监控）
+
+第五阶段（综合实践）:  实战案例 → 最佳实践
+                   （融会贯通，从项目中学经验）
 ```
+
+![五阶段学习路线图](images/langchain_roadmap.png)
+
+> **学习建议**：按阶段推进，每个阶段都动手写代码跑通，不要贪多跳级。
 
 ### 环境安装
 
